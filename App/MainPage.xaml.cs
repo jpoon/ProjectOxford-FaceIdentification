@@ -39,6 +39,9 @@ using Windows.UI.Xaml.Shapes;
 using Windows.Media.FaceAnalysis;
 using Windows.UI;
 using System.Collections.Generic;
+using Oxford;
+using Windows.UI.Xaml.Media.Imaging;
+using Windows.Storage.Pickers;
 
 namespace FaceIdentification
 {
@@ -69,6 +72,9 @@ namespace FaceIdentification
         // Information about the camera device
         private bool _mirroringPreview;
         private bool _externalCamera;
+
+        private FaceClient _faceClient = new FaceClient();
+        private Log _log;
 
         #region Constructor, lifecycle and navigation
 
@@ -195,24 +201,110 @@ namespace FaceIdentification
             await Dispatcher.RunAsync(CoreDispatcherPriority.Normal, () => UpdateButtonOrientation());
         }
 
-        private void CreatePerson_Tapped(object sender, RoutedEventArgs e)
+        private async void CreatePerson_Tapped(object sender, RoutedEventArgs e)
         {
+            // save photo
+            var storageFile = await SavePhotoAsync();
+            var name = await CreateNameDialog();
 
+            if (!String.IsNullOrEmpty(name))
+            {
+                try {
+                    await _faceClient.UpsertPersonAsync(storageFile, name);
+                } catch (Exception ex)
+                {
+                    _log.WriteLine(ex.ToString());
+                }
+            }
+        }
+
+        private async Task<string> CreateNameDialog()
+        {
+            // get name
+            var dialog = new ContentDialog()
+            {
+                Title = "Person",
+            };
+
+            var panel = new StackPanel();
+            var textBox = new TextBox
+            {
+                Name = "name",
+                Header = "Name:",
+                TextWrapping = TextWrapping.Wrap,
+            };
+            panel.Children.Add(textBox);
+            dialog.Content = panel;
+
+            dialog.PrimaryButtonText = "Save";
+            dialog.IsPrimaryButtonEnabled = true;
+
+            await dialog.ShowAsync();
+
+            return textBox.Text;
+        }
+
+        private async Task<StorageFile> FilePicker()
+        {
+            FileOpenPicker fp = new FileOpenPicker();
+            fp.FileTypeFilter.Add(".jpeg");
+            fp.FileTypeFilter.Add(".png");
+            fp.FileTypeFilter.Add(".bmp");
+            fp.FileTypeFilter.Add(".jpg");
+            return await fp.PickSingleFileAsync();
+        }
+
+        private async void CreatePerson_Holding(object sender, RightTappedRoutedEventArgs e)
+        {
+            var storageFile = await FilePicker();
+            var name = await CreateNameDialog();
+
+            if (!String.IsNullOrEmpty(name))
+            {
+                try
+                {
+                    await _faceClient.UpsertPersonAsync(storageFile, name);
+                }
+                catch (Exception ex)
+                {
+                    _log.WriteLine(ex.ToString());
+                }
+            }
+        }
+
+        private async void IdentifyPerson_Holding(object sender, RightTappedRoutedEventArgs e)
+        {
+            var storageFile = await FilePicker();
+            IdentifyPhoto(storageFile);
         }
 
         private async void PhotoButton_Tapped(object sender, TappedRoutedEventArgs e)
         {
-            await TakePhotoAsync();
+            // save photo
+            var storageFile = await SavePhotoAsync();
+            IdentifyPhoto(storageFile);
         }
 
-        private async void HardwareButtons_CameraPressed(object sender, CameraEventArgs e)
+        private async void IdentifyPhoto(StorageFile storageFile)
         {
-            await TakePhotoAsync();
+            FacesCanvas.Children.Clear();
+            Snapshot.Source = await GetBitmapAsync(storageFile);
+
+            try
+            {
+                var people = await _faceClient.IdentifyAsync(storageFile);
+                _log.WriteLine($"Found {people.Count} people");
+                DrawFaces(people);
+            }
+            catch (Exception ex)
+            {
+                _log.WriteLine(ex.ToString());
+            }
         }
 
         private async void MediaCapture_Failed(MediaCapture sender, MediaCaptureFailedEventArgs errorEventArgs)
         {
-            Debug.WriteLine("MediaCapture_Failed: (0x{0:X}) {1}", errorEventArgs.Code, errorEventArgs.Message);
+            _log.WriteLine($"MediaCapture_Failed: (0x{0:errorEventArgs.Code}) {errorEventArgs.Message}");
 
             await CleanupCameraAsync();
 
@@ -224,13 +316,23 @@ namespace FaceIdentification
 
         #region MediaCapture methods
 
+        public async Task<BitmapImage> GetBitmapAsync(StorageFile storageFile)
+        {
+            BitmapImage bitmap = new BitmapImage();
+            IAsyncOperation<IRandomAccessStreamWithContentType> read = storageFile.OpenReadAsync();
+            IRandomAccessStream stream = await read;
+            bitmap.SetSource(stream);
+
+            return bitmap;
+        }
+
         /// <summary>
         /// Initializes the MediaCapture, registers events, gets camera device information for mirroring and rotating, starts preview and unlocks the UI
         /// </summary>
         /// <returns></returns>
         private async Task InitializeCameraAsync()
         {
-            Debug.WriteLine("InitializeCameraAsync");
+            _log.WriteLine("InitializeCameraAsync");
 
             if (_mediaCapture == null)
             {
@@ -239,7 +341,7 @@ namespace FaceIdentification
 
                 if (cameraDevice == null)
                 {
-                    Debug.WriteLine("No camera device found!");
+                    _log.WriteLine("No camera device found!");
                     return;
                 }
 
@@ -259,7 +361,7 @@ namespace FaceIdentification
                 }
                 catch (UnauthorizedAccessException)
                 {
-                    Debug.WriteLine("The app was denied access to the camera");
+                    _log.WriteLine("The app was denied access to the camera");
                 }
 
                 // If initialization succeeded, start the preview
@@ -361,24 +463,37 @@ namespace FaceIdentification
         /// Takes a photo to a StorageFile and adds rotation metadata to it
         /// </summary>
         /// <returns></returns>
-        private async Task TakePhotoAsync()
+        private async Task<StorageFile> SavePhotoAsync()
         {
-            var stream = new InMemoryRandomAccessStream();
+            var file = await KnownFolders.PicturesLibrary.CreateFileAsync($"{Guid.NewGuid()}.jpeg", CreationCollisionOption.GenerateUniqueName);
 
             try
             {
-                Debug.WriteLine("Taking photo...");
-                await _mediaCapture.CapturePhotoToStreamAsync(ImageEncodingProperties.CreateJpeg(), stream);
-                Debug.WriteLine("Photo taken!");
+                using (var stream = new InMemoryRandomAccessStream())
+                using (var inputStream = stream)
+                using (var outputStream = await file.OpenAsync(FileAccessMode.ReadWrite))
+                {
+                    _log.WriteLine("Taking photo...");
+                    await _mediaCapture.CapturePhotoToStreamAsync(ImageEncodingProperties.CreateJpeg(), stream);
+                    _log.WriteLine("Photo taken!");
 
-                var photoOrientation = ConvertOrientationToPhotoOrientation(GetCameraOrientation());
+                    var photoOrientation = ConvertOrientationToPhotoOrientation(GetCameraOrientation());
 
-                await ReencodeAndSavePhotoAsync(stream, photoOrientation);
+                    var decoder = await BitmapDecoder.CreateAsync(inputStream);
+                    var encoder = await BitmapEncoder.CreateForTranscodingAsync(outputStream, decoder);
+
+                    var properties = new BitmapPropertySet { { "System.Photo.Orientation", new BitmapTypedValue(photoOrientation, PropertyType.UInt16) } };
+
+                    await encoder.BitmapProperties.SetPropertiesAsync(properties);
+                    await encoder.FlushAsync();
+
+                    return file;
+                }
             }
             catch (Exception ex)
             {
-                // File I/O errors are reported as exceptions
-                Debug.WriteLine("Exception when taking a photo: {0}", ex.ToString());
+                _log.WriteLine($"Exception when taking a photo: {ex.ToString()}");
+                throw;
             }
         }
 
@@ -388,7 +503,7 @@ namespace FaceIdentification
         /// <returns></returns>
         private async Task CleanupCameraAsync()
         {
-            Debug.WriteLine("CleanupCameraAsync");
+            _log.WriteLine("CleanupCameraAsync");
 
             if (_isInitialized)
             {
@@ -422,6 +537,9 @@ namespace FaceIdentification
         /// <returns></returns>
         private async Task SetupUiAsync()
         {
+            _log = new Log(logWindow, logScrollWindow, Dispatcher);
+            _faceClient.Log = _log;
+
             // Attempt to lock page to landscape orientation to prevent the CaptureElement from rotating, as this gives a better experience
             DisplayInformation.AutoRotationPreferences = DisplayOrientations.Landscape;
 
@@ -481,11 +599,6 @@ namespace FaceIdentification
         /// </summary>
         private void RegisterEventHandlers()
         {
-            if (ApiInformation.IsTypePresent("Windows.Phone.UI.Input.HardwareButtons"))
-            {
-                HardwareButtons.CameraPressed += HardwareButtons_CameraPressed;
-            }
-
             // If there is an orientation sensor present on the device, register for notifications
             if (_orientationSensor != null)
             {
@@ -504,11 +617,6 @@ namespace FaceIdentification
         /// </summary>
         private void UnregisterEventHandlers()
         {
-            if (ApiInformation.IsTypePresent("Windows.Phone.UI.Input.HardwareButtons"))
-            {
-                HardwareButtons.CameraPressed -= HardwareButtons_CameraPressed;
-            }
-
             if (_orientationSensor != null)
             {
                 _orientationSensor.OrientationChanged -= OrientationSensor_OrientationChanged;
@@ -533,32 +641,6 @@ namespace FaceIdentification
 
             // If there is no device mounted on the desired panel, return the first device found
             return desiredDevice ?? allVideoDevices.FirstOrDefault();
-        }
-
-        /// <summary>
-        /// Applies the given orientation to a photo stream and saves it as a StorageFile
-        /// </summary>
-        /// <param name="stream">The photo stream</param>
-        /// <param name="photoOrientation">The orientation metadata to apply to the photo</param>
-        /// <returns></returns>
-        private static async Task ReencodeAndSavePhotoAsync(IRandomAccessStream stream, PhotoOrientation photoOrientation)
-        {
-            using (var inputStream = stream)
-            {
-                var decoder = await BitmapDecoder.CreateAsync(inputStream);
-
-                var file = await KnownFolders.PicturesLibrary.CreateFileAsync("SimplePhoto.jpeg", CreationCollisionOption.GenerateUniqueName);
-
-                using (var outputStream = await file.OpenAsync(FileAccessMode.ReadWrite))
-                {
-                    var encoder = await BitmapEncoder.CreateForTranscodingAsync(outputStream, decoder);
-
-                    var properties = new BitmapPropertySet { { "System.Photo.Orientation", new BitmapTypedValue(photoOrientation, PropertyType.UInt16) } };
-
-                    await encoder.BitmapProperties.SetPropertiesAsync(properties);
-                    await encoder.FlushAsync();
-                }
-            }
         }
 
         #endregion Helper functions
@@ -708,5 +790,31 @@ namespace FaceIdentification
 
         #endregion Rotation helpers
 
+        private void DrawFaces(List<IdentifiedPerson> people)
+        {
+            foreach (var person in people)
+            {
+                Rectangle faceBoundingBox = new Rectangle();
+
+                var isFound = !String.IsNullOrEmpty(person.PersonName);
+
+                if (isFound)
+                {
+                    TextBlock label = new TextBlock();
+                    label.Text = person.PersonName;
+                    label.Margin = new Thickness(person.Face.FaceRectangle.Left, (person.Face.FaceRectangle.Top) - 20, person.Face.FaceRectangle.Height, person.Face.FaceRectangle.Width);
+                    label.Foreground = new SolidColorBrush(Colors.DeepSkyBlue);
+                    FacesCanvas.Children.Add(label);
+                }
+
+                faceBoundingBox.StrokeThickness = 2;
+                faceBoundingBox.Stroke = isFound ? new SolidColorBrush(Colors.DeepSkyBlue) : new SolidColorBrush(Colors.Red);
+                faceBoundingBox.Margin = new Thickness(person.Face.FaceRectangle.Left, person.Face.FaceRectangle.Top, person.Face.FaceRectangle.Height, person.Face.FaceRectangle.Width);
+                faceBoundingBox.Width = person.Face.FaceRectangle.Width;
+                faceBoundingBox.Height = person.Face.FaceRectangle.Height;
+
+                FacesCanvas.Children.Add(faceBoundingBox);
+            }
+        }
     }
 }

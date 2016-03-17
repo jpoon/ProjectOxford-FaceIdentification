@@ -119,7 +119,12 @@
       <SubType>Designer</SubType>
     </Page>
   </ItemGroup>
-  <ItemGroup />
+  <ItemGroup>
+    <ProjectReference Include="..\Oxford\Oxford.csproj">
+      <Project>{67e37359-bf12-41cc-8e2c-79013741d158}</Project>
+      <Name>Oxford</Name>
+    </ProjectReference>
+  </ItemGroup>
   <ItemGroup>
     <Content Include="Assets\LockScreenLogo.scale-200.png" />
     <Content Include="Assets\SmallTile-sdk.scale-200.png" />

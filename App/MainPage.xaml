@@ -24,7 +24,7 @@
         <SolidColorBrush x:Key="TranslucentBlackBrush" Color="Black" Opacity="0.3"/>
     </Page.Resources>
 
-    <Grid Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+    <Grid Background="Black">
         <Grid.Resources>
             <Style TargetType="Button">
                 <Setter Property="Margin" Value="10,40"/>
@@ -42,40 +42,51 @@
         </Grid.Resources>
 
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="2*"></ColumnDefinition>
+            <ColumnDefinition Width="1*"></ColumnDefinition>
             <ColumnDefinition Width="1*"></ColumnDefinition>
         </Grid.ColumnDefinitions>
 
-        <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="50"></RowDefinition>
+            <RowDefinition Height="3*"></RowDefinition>
+            <RowDefinition Height="1*"></RowDefinition>
+        </Grid.RowDefinitions>
 
-            <!--Camera preview-->
-            <CaptureElement Name="PreviewControl" Stretch="Uniform"/>
-
+        <Grid Grid.Column="0" Grid.Row="1">
             <Canvas>
-                <Canvas Name="FacesCanvas" RenderTransformOrigin="0.5,0.5"/>
+                <!--Camera preview-->
+                <CaptureElement Name="PreviewControl" Stretch="None"/>
+
+                <!-- Capture + Record buttons -->
+                <StackPanel Canvas.ZIndex="0" HorizontalAlignment="Left" VerticalAlignment="Center">
+                    <Button x:Name="CreatePersonButton" IsEnabled="False" Tapped="CreatePerson_Tapped" RightTapped="CreatePerson_Holding">
+                        <Viewbox>
+                            <SymbolIcon Symbol="Contact"/>
+                        </Viewbox>
+                    </Button>
+
+                    <Button x:Name="IdentifyPeopleButton" Tapped="PhotoButton_Tapped" RightTapped="IdentifyPerson_Holding" IsEnabled="False">
+                        <Viewbox>
+                            <SymbolIcon Symbol="People"/>
+                        </Viewbox>
+                    </Button>
+                </StackPanel>
             </Canvas>
-
-            <!-- Capture + Record buttons -->
-            <StackPanel HorizontalAlignment="Right" VerticalAlignment="Center">
-
-                <Button x:Name="CreatePersonButton" IsEnabled="False" Tapped="CreatePerson_Tapped">
-                    <Viewbox>
-                        <SymbolIcon Symbol="Contact"/>
-                    </Viewbox>
-                </Button>
-
-                <Button x:Name="IdentifyPeopleButton" Tapped="PhotoButton_Tapped" IsEnabled="False">
-                    <Viewbox>
-                        <SymbolIcon Symbol="People"/>
-                    </Viewbox>
-                </Button>
-            </StackPanel>
-
-            <!--Button to enable / disable face detection-->
         </Grid>
 
-        <Grid Grid.Column="1">
-            <TextBox Padding="5" TextWrapping="Wrap" Background="FloralWhite" />
+        <Grid Grid.Column="1" Grid.Row="1">
+            <Canvas>
+                <Image Canvas.ZIndex="0" Name="Snapshot" Stretch="None" />
+
+                <!-- Faces -->
+                <Canvas Canvas.ZIndex="1" Name="FacesCanvas" RenderTransformOrigin="0.5,0.5"/>
+            </Canvas>
+        </Grid>
+
+        <Grid ColumnSpan="2" Grid.Row="2" Background="AntiqueWhite">
+            <ScrollViewer Name="logScrollWindow">
+                <TextBlock Name="logWindow" />
+            </ScrollViewer>
         </Grid>
     </Grid>
 </Page>
