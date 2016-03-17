@@ -5,4 +5,4 @@ The content of the PowerPoint was inspired by Harry Shum's 2015 //build presenta
 
 ## License
 
-MIT licensed, Copyright (C) 2015 Jason Poon, Felix Rieseberg. For more details, see LICENSE.md
+MIT licensed, Copyright (C) 2016 Jason Poon. For more details, see LICENSE.md
